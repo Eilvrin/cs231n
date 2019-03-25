@@ -137,7 +137,43 @@ class CaptioningRNN(object):
         # defined above to store loss and gradients; grads[k] should give the      #
         # gradients for self.params[k].                                            #
         ############################################################################
-        pass
+        #1
+        h0 = features.dot(W_proj) + b_proj
+        #2
+        x, cache_word_embedding = word_embedding_forward(captions_in, W_embed)
+        #3
+        if self.cell_type == 'rnn':
+            h, cache_rnn = rnn_forward(x, h0, Wx, Wh, b)
+        elif self.cell_type == 'lstm':
+            h, cache_lstm = lstm_forward(x, h0, Wx, Wh, b)
+        else:
+            raise ValueError('%s is not valid cell type' % (self.cell_type))
+        #4
+        scores, cache_scores = temporal_affine_forward (h, W_vocab, b_vocab)
+        #5
+        loss, dscores = temporal_softmax_loss(scores, captions_out, mask)
+        
+        # Backward
+        dh, dW_vocab, db_vocab = temporal_affine_backward(dscores, cache_scores)
+        grads['W_vocab'] = dW_vocab
+        grads['b_vocab'] = db_vocab
+        
+        if self.cell_type == 'rnn':
+            dx, dh0, dWx, dWh, db = rnn_backward(dh, cache_rnn)
+            grads['b'], grads['Wh'], grads['Wx'] = db, dWh, dWx
+        elif self.cell_type == 'lstm':
+            dx, dh0, dWx, dWh, db = lstm_backward(dh, cache_lstm)
+            grads['b'], grads['Wh'], grads['Wx'] = db, dWh, dWx
+        else:
+            raise ValueError('%s is not valid cell type' % (self.cell_type))
+        
+        dW_embed = word_embedding_backward(dx, cache_word_embedding)
+        grads['W_embed'] = dW_embed
+        
+        dW_proj = np.dot(features.T, dh0)
+        db_proj = np.sum(dh0, axis=0)
+        grads['W_proj'] = dW_proj
+        grads['b_proj'] = db_proj
         ############################################################################
         #                             END OF YOUR CODE                             #
         ############################################################################
@@ -199,7 +235,32 @@ class CaptioningRNN(object):
         # functions; you'll need to call rnn_step_forward or lstm_step_forward in #
         # a loop.                                                                 #
         ###########################################################################
-        pass
+        h0 = features.dot(W_proj) + b_proj
+        captions[:, 0] = self._start
+        
+        capt = self._start * np.ones((N), dtype=np.int32)
+        word_embed, _ = word_embedding_forward(capt, W_embed)
+        
+        curr_h = h0
+        
+        if self.cell_type == 'lstm':
+            curr_c = np.zeros_like(curr_h)
+        
+        for i in range(max_length-1):
+
+            if self.cell_type == 'rnn':
+                curr_h, _ = rnn_step_forward(word_embed, curr_h, Wx, Wh, b)
+            elif self.cell_type == 'lstm':
+                curr_h, curr_c, _ = lstm_step_forward(word_embed, curr_h, curr_c, Wx, Wh, b)
+            else:
+                raise ValueError('%s is not valid cell type' % (self.cell_type))
+                
+            scores, _ = affine_forward(curr_h, W_vocab, b_vocab)
+            
+            captions[:,i+1] = np.argmax(scores, axis=1)
+            
+            word_embed, _ = word_embedding_forward(captions[:, i+1], W_embed)
+
         ############################################################################
         #                             END OF YOUR CODE                             #
         ############################################################################
